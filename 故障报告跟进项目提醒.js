@@ -197,10 +197,9 @@ function generateFollowUpOwnerEmailContent(dueSoonItems, overdueItems) {
         : `<div style="background:linear-gradient(135deg,#f39c12,#e67e22);color:white;padding:6px 12px;border-radius:16px;font-size:12px;font-weight:600;display:inline-block;min-width:80px;text-align:center;"><span style="display:block;">还剩 ${days}天</span><span style="display:block;font-size:10px;opacity:0.9;">Days Left</span></div>`;
       rows += `
         <tr style="background-color:${i % 2 === 0 ? rowBgAlt : '#ffffff'};">
-          <td style="padding:12px;border-bottom:1px solid #e9ecef;font-weight:500;color:#2c3e50;">${item.id}</td>
-          <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;">${item.reportNo}</td>
-          <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;">${item.paType}</td>
+          <td style="padding:12px;border-bottom:1px solid #e9ecef;font-weight:500;color:#2c3e50;">${item.reportNo}</td>
           <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;max-width:220px;word-wrap:break-word;">${item.paPlan}</td>
+          <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;">${extractNameFromPersonField(item.owner)}</td>
           <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;font-family:monospace;">${formatFollowUpDate(item.dueDate)}</td>
           <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;">${item.status}</td>
           <td style="padding:12px;border-bottom:1px solid #e9ecef;text-align:center;">${badge}</td>
@@ -212,11 +211,10 @@ function generateFollowUpOwnerEmailContent(dueSoonItems, overdueItems) {
         <table style="width:100%;border-collapse:collapse;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
           <thead>
             <tr style="background:${headerGrad};color:white;">
-              <th style="padding:12px;text-align:left;font-weight:600;">跟进编号<br><span style="font-size:0.8em;opacity:0.9;">Follow-up ID</span></th>
               <th style="padding:12px;text-align:left;font-weight:600;">故障报告编号<br><span style="font-size:0.8em;opacity:0.9;">Report No.</span></th>
-              <th style="padding:12px;text-align:left;font-weight:600;">行动类型<br><span style="font-size:0.8em;opacity:0.9;">Type</span></th>
               <th style="padding:12px;text-align:left;font-weight:600;">预防行动<br><span style="font-size:0.8em;opacity:0.9;">Action Plan</span></th>
-              <th style="padding:12px;text-align:left;font-weight:600;">完成时间<br><span style="font-size:0.8em;opacity:0.9;">Due Date</span></th>
+              <th style="padding:12px;text-align:left;font-weight:600;">责任人<br><span style="font-size:0.8em;opacity:0.9;">Owner</span></th>
+              <th style="padding:12px;text-align:left;font-weight:600;">期限<br><span style="font-size:0.8em;opacity:0.9;">Due Date</span></th>
               <th style="padding:12px;text-align:left;font-weight:600;">状态<br><span style="font-size:0.8em;opacity:0.9;">Status</span></th>
               <th style="padding:12px;text-align:center;font-weight:600;">${isOverdue ? '逾期天数<br><span style="font-size:0.8em;opacity:0.9;">Overdue Days</span>' : '剩余天数<br><span style="font-size:0.8em;opacity:0.9;">Days Left</span>'}</th>
             </tr>
@@ -288,6 +286,7 @@ function generateFollowUpVerifierEmailContent(items) {
         <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;">${item.reportNo}</td>
         <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;">${item.paType}</td>
         <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;max-width:220px;word-wrap:break-word;">${item.paPlan}</td>
+        <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;max-width:200px;word-wrap:break-word;">${item.notes}</td>
         <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;font-family:monospace;">${formatFollowUpDate(item.dueDate)}</td>
         <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;">${extractNameFromPersonField(item.owner)}</td>
         <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;">${item.status}</td>
@@ -318,6 +317,7 @@ function generateFollowUpVerifierEmailContent(items) {
                 <th style="padding:12px;text-align:left;font-weight:600;">故障报告编号<br><span style="font-size:0.8em;opacity:0.9;">Report No.</span></th>
                 <th style="padding:12px;text-align:left;font-weight:600;">行动类型<br><span style="font-size:0.8em;opacity:0.9;">Type</span></th>
                 <th style="padding:12px;text-align:left;font-weight:600;">预防行动<br><span style="font-size:0.8em;opacity:0.9;">Action Plan</span></th>
+                <th style="padding:12px;text-align:left;font-weight:600;">跟进内容<br><span style="font-size:0.8em;opacity:0.9;">Follow-up Notes</span></th>
                 <th style="padding:12px;text-align:left;font-weight:600;">完成时间<br><span style="font-size:0.8em;opacity:0.9;">Due Date</span></th>
                 <th style="padding:12px;text-align:left;font-weight:600;">责任人<br><span style="font-size:0.8em;opacity:0.9;">Owner</span></th>
                 <th style="padding:12px;text-align:left;font-weight:600;">状态<br><span style="font-size:0.8em;opacity:0.9;">Status</span></th>
