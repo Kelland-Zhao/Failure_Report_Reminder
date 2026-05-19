@@ -18,6 +18,7 @@ function dailyFollowUpReminder() {
     const followUpData = getFollowUpData();
     if (!followUpData || followUpData.length === 0) {
       console.log('没有找到跟进项目数据');
+      logSystemActivity('跟进项目提醒', '没有找到跟进项目数据，跳过执行');
       return;
     }
 
@@ -27,7 +28,7 @@ function dailyFollowUpReminder() {
     const verifierMap = {};
 
     followUpData.forEach(item => {
-      const verify = item.verify || '';
+      const verify = item.status || '';
 
       if (verify.includes('已通过')) return;
 
@@ -81,7 +82,7 @@ function dailyFollowUpReminder() {
       console.log(`✅ 验证人提醒 → ${email} (${items.length}条待验证)`);
     }
 
-    logSystemActivity('跟进项目提醒', `责任人提醒:${ownerSent}封, 验证人提醒:${verifierSent}封`);
+    logSystemActivity('跟进项目提醒', `成功执行，责任人提醒 ${ownerSent} 封，验证人提醒 ${verifierSent} 封，共处理 ${followUpData.length} 条跟进项目`);
     console.log('=== 故障报告跟进项目提醒执行完成 ===');
 
   } catch (error) {
@@ -117,7 +118,6 @@ function getFollowUpData() {
         dueDate:     row[idx['完成时间 / pa_when']]                || '',
         verifier:String(row[idx['验证人 / pa_verifier']]           || ''),
         status:      row[idx['状态 / status']]                     || '',
-        verify:      row[idx['验证 / Verify']]                     || '',
         notes:       row[idx['跟进内容 / follow_up_notes']]        || ''
       });
     }
@@ -203,7 +203,6 @@ function generateFollowUpOwnerEmailContent(dueSoonItems, overdueItems) {
           <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;max-width:220px;word-wrap:break-word;">${item.paPlan}</td>
           <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;font-family:monospace;">${formatFollowUpDate(item.dueDate)}</td>
           <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;">${item.status}</td>
-          <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;">${item.verify}</td>
           <td style="padding:12px;border-bottom:1px solid #e9ecef;text-align:center;">${badge}</td>
         </tr>`;
     });
@@ -219,7 +218,6 @@ function generateFollowUpOwnerEmailContent(dueSoonItems, overdueItems) {
               <th style="padding:12px;text-align:left;font-weight:600;">预防行动<br><span style="font-size:0.8em;opacity:0.9;">Action Plan</span></th>
               <th style="padding:12px;text-align:left;font-weight:600;">完成时间<br><span style="font-size:0.8em;opacity:0.9;">Due Date</span></th>
               <th style="padding:12px;text-align:left;font-weight:600;">状态<br><span style="font-size:0.8em;opacity:0.9;">Status</span></th>
-              <th style="padding:12px;text-align:left;font-weight:600;">验证状态<br><span style="font-size:0.8em;opacity:0.9;">Verify</span></th>
               <th style="padding:12px;text-align:center;font-weight:600;">${isOverdue ? '逾期天数<br><span style="font-size:0.8em;opacity:0.9;">Overdue Days</span>' : '剩余天数<br><span style="font-size:0.8em;opacity:0.9;">Days Left</span>'}</th>
             </tr>
           </thead>
