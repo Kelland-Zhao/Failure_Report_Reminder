@@ -8,6 +8,49 @@
  * - 验证列含"未验证"              → 每天提醒验证人进行验证
  */
 
+// 权限表配置
+const PERMISSION_CONFIG = {
+  SPREADSHEET_ID: '1F7G3WOY5xM4fEYZ1s5RKulY4kJhqCZ9HefthmiVkraM',
+  SHEET_NAME: 'userID'
+};
+
+/**
+ * 获取项目跟进管理员邮箱列表
+ * 从权限表 userID sheet 中读取 BH 列="管理员"的用户 GMail
+ */
+function getAdminEmails() {
+  try {
+    const sheet = SpreadsheetApp.openById(PERMISSION_CONFIG.SPREADSHEET_ID)
+      .getSheetByName(PERMISSION_CONFIG.SHEET_NAME);
+    if (!sheet) { console.error('权限表未找到'); return []; }
+
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 3) return [];
+
+    // Row 1 = category, Row 2 = headers, Row 3+ = data
+    const headers = data[1];
+    const bhIndex = headers.findIndex(h => h === '项目跟进权限管理');
+    const gmailIndex = headers.findIndex(h => h === 'GMail');
+    if (bhIndex === -1 || gmailIndex === -1) {
+      console.error('权限表缺少必要列');
+      return [];
+    }
+
+    const admins = [];
+    for (let i = 2; i < data.length; i++) {
+      if (String(data[i][bhIndex] || '').trim() === '管理员') {
+        const email = String(data[i][gmailIndex] || '').trim();
+        if (email) admins.push(email);
+      }
+    }
+    console.log(`管理员邮箱: ${admins.join(', ') || '无'}`);
+    return admins;
+  } catch (error) {
+    console.error('获取管理员邮箱时出错:', error);
+    return [];
+  }
+}
+
 /**
  * 主函数：每日执行故障报告跟进项目提醒
  */
@@ -53,33 +96,58 @@ function dailyFollowUpReminder() {
       }
     });
 
+    const adminEmails = getAdminEmails();
+
+    // 合并发送责任人提醒（一封邮件发给所有责任人，CC管理员）
     let ownerSent = 0;
+    const allOwnerEmails = [];
+    const allOwnerDueSoon = [];
+    const allOwnerOverdue = [];
+
     for (const email in ownerMap) {
       const { dueSoon, overdue } = ownerMap[email];
       if (dueSoon.length === 0 && overdue.length === 0) continue;
-      const subject = overdue.length > 0
-        ? '【逾期提醒】故障报告跟进项目逾期 / Follow-up Items Overdue'
-        : '【临期提醒】故障报告跟进项目即将到期 / Follow-up Items Due Soon';
-      GmailApp.sendEmail(email, subject, '请使用支持HTML的邮件客户端查看此邮件。', {
-        htmlBody: generateFollowUpOwnerEmailContent(dueSoon, overdue),
-        name: '故障报告提醒系统'
-      });
-      ownerSent++;
-      console.log(`✅ 责任人提醒 → ${email} (临期:${dueSoon.length} 逾期:${overdue.length})`);
+      allOwnerEmails.push(email);
+      allOwnerDueSoon.push(...dueSoon.map(item => ({ ...item, _ownerEmail: email })));
+      allOwnerOverdue.push(...overdue.map(item => ({ ...item, _ownerEmail: email })));
     }
 
+    if (allOwnerEmails.length > 0) {
+      const subject = allOwnerOverdue.length > 0
+        ? '【逾期提醒】故障报告跟进项目逾期 / Follow-up Items Overdue'
+        : '【临期提醒】故障报告跟进项目即将到期 / Follow-up Items Due Soon';
+      GmailApp.sendEmail(allOwnerEmails.join(','), subject,
+        '请使用支持HTML的邮件客户端查看此邮件。', {
+          htmlBody: generateMergedOwnerEmailContent(allOwnerDueSoon, allOwnerOverdue),
+          name: '故障报告提醒系统',
+          cc: adminEmails.join(',')
+        });
+      ownerSent = 1;
+      console.log(`✅ 责任人合并提醒 → To: ${allOwnerEmails.join(', ')} (临期:${allOwnerDueSoon.length} 逾期:${allOwnerOverdue.length}) CC: ${adminEmails.join(', ')}`);
+    }
+
+    // 合并发送验证人提醒（一封邮件发给所有验证人，CC管理员）
     let verifierSent = 0;
+    const allVerifierEmails = [];
+    const allVerifierItems = [];
+
     for (const email in verifierMap) {
       const items = verifierMap[email];
       if (items.length === 0) continue;
-      GmailApp.sendEmail(email,
+      allVerifierEmails.push(email);
+      allVerifierItems.push(...items.map(item => ({ ...item, _verifierEmail: email })));
+    }
+
+    if (allVerifierEmails.length > 0) {
+      GmailApp.sendEmail(allVerifierEmails.join(','),
         '【验证提醒】故障报告跟进项目待验证 / Follow-up Items Pending Verification',
         '请使用支持HTML的邮件客户端查看此邮件。', {
-          htmlBody: generateFollowUpVerifierEmailContent(items),
-          name: '故障报告提醒系统'
+          htmlBody: generateMergedVerifierEmailContent(allVerifierItems),
+          name: '故障报告提醒系统',
+          cc: adminEmails.join(',')
         });
-      verifierSent++;
-      console.log(`✅ 验证人提醒 → ${email} (${items.length}条待验证)`);
+      verifierSent = 1;
+      console.log(`✅ 验证人合并提醒 → To: ${allVerifierEmails.join(', ')} (${allVerifierItems.length}条待验证) CC: ${adminEmails.join(', ')}`);
     }
 
     logSystemActivity('跟进项目提醒', `成功执行，责任人提醒 ${ownerSent} 封，验证人提醒 ${verifierSent} 封，共处理 ${followUpData.length} 条跟进项目`);
@@ -336,6 +404,226 @@ function generateFollowUpVerifierEmailContent(items) {
         </div>
       </div>
     </div>`;
+}
+
+/**
+ * 生成合并的责任人跟进提醒邮件内容（按人员分组）
+ */
+function generateMergedOwnerEmailContent(allDueSoon, allOverdue) {
+  const hasOverdue = allOverdue.length > 0;
+  const today = formatDate(new Date());
+  const accentColor = hasOverdue ? '#f44336' : '#f39c12';
+  const darkColor = hasOverdue ? '#d32f2f' : '#e65100';
+  const bgColor = hasOverdue ? '#ffebee' : '#fff8e1';
+
+  // 按邮箱分组
+  const groupByEmail = (items) => {
+    const map = {};
+    items.forEach(item => {
+      const email = item._ownerEmail;
+      if (!map[email]) map[email] = [];
+      map[email].push(item);
+    });
+    return map;
+  };
+
+  const buildPersonSection = (email, items, isOverdue) => {
+    const name = extractNameFromPersonField((items[0] || {}).owner || '');
+    const headerGrad = isOverdue
+      ? 'linear-gradient(135deg,#f44336,#d32f2f)'
+      : 'linear-gradient(135deg,#f39c12,#e67e22)';
+    const rowBgAlt = isOverdue ? '#fff5f5' : '#fffbf0';
+
+    let rows = '';
+    items.forEach((item, i) => {
+      const days = calcDaysUntilDue(item.dueDate);
+      const badge = isOverdue
+        ? `<div style="background:linear-gradient(135deg,#f44336,#d32f2f);color:white;padding:6px 12px;border-radius:16px;font-size:12px;font-weight:600;display:inline-block;min-width:80px;text-align:center;"><span style="display:block;">[逾期] ${Math.abs(days)}天</span><span style="display:block;font-size:10px;opacity:0.9;">Days Overdue</span></div>`
+        : `<div style="background:linear-gradient(135deg,#f39c12,#e67e22);color:white;padding:6px 12px;border-radius:16px;font-size:12px;font-weight:600;display:inline-block;min-width:80px;text-align:center;"><span style="display:block;">还剩 ${days}天</span><span style="display:block;font-size:10px;opacity:0.9;">Days Left</span></div>`;
+      rows += `
+        <tr style="background-color:${i % 2 === 0 ? rowBgAlt : '#ffffff'};">
+          <td style="padding:12px;border-bottom:1px solid #e9ecef;font-weight:500;color:#2c3e50;">${item.reportNo}</td>
+          <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;max-width:220px;word-wrap:break-word;">${item.paPlan}</td>
+          <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;">${extractNameFromPersonField(item.owner)}</td>
+          <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;font-family:monospace;">${formatFollowUpDate(item.dueDate)}</td>
+          <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;">${item.status}</td>
+          <td style="padding:12px;border-bottom:1px solid #e9ecef;text-align:center;">${badge}</td>
+        </tr>`;
+    });
+
+    return `
+      <div style="margin-bottom:15px;">
+        <h4 style="color:${darkColor};margin-bottom:8px;padding:8px 12px;background:${rowBgAlt};border-radius:6px;border-left:3px solid ${accentColor};">
+          ${name} (${email}) - ${items.length}条
+        </h4>
+        <div style="overflow-x:auto;">
+          <table style="width:100%;border-collapse:collapse;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+            <thead>
+              <tr style="background:${headerGrad};color:white;">
+                <th style="padding:10px;text-align:left;font-weight:600;">故障报告编号<br><span style="font-size:0.8em;opacity:0.9;">Report No.</span></th>
+                <th style="padding:10px;text-align:left;font-weight:600;">预防行动<br><span style="font-size:0.8em;opacity:0.9;">Action Plan</span></th>
+                <th style="padding:10px;text-align:left;font-weight:600;">责任人<br><span style="font-size:0.8em;opacity:0.9;">Owner</span></th>
+                <th style="padding:10px;text-align:left;font-weight:600;">期限<br><span style="font-size:0.8em;opacity:0.9;">Due Date</span></th>
+                <th style="padding:10px;text-align:left;font-weight:600;">状态<br><span style="font-size:0.8em;opacity:0.9;">Status</span></th>
+                <th style="padding:10px;text-align:center;font-weight:600;">${isOverdue ? '逾期天数<br><span style="font-size:0.8em;opacity:0.9;">Overdue Days</span>' : '剩余天数<br><span style="font-size:0.8em;opacity:0.9;">Days Left</span>'}</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  };
+
+  let body = `
+    <div style="font-family:Arial,sans-serif;max-width:900px;margin:0 auto;background-color:#f8f9fa;padding:20px;">
+      <div style="background:${bgColor};border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1);padding:30px;margin-bottom:20px;border-left:5px solid ${accentColor};">
+        <h2 style="color:${darkColor};text-align:center;margin-bottom:20px;border-bottom:3px solid ${accentColor};padding-bottom:10px;">
+          ${hasOverdue ? '[逾期提醒] 故障报告跟进项目逾期' : '[临期提醒] 故障报告跟进项目即将到期'}<br>
+          <span style="font-size:0.8em;">${hasOverdue ? 'Follow-up Items Overdue Reminder' : 'Follow-up Items Due Soon Reminder'}</span>
+        </h2>
+        <p style="font-size:16px;line-height:1.6;color:${darkColor};">
+          您好！（${today}）以下故障报告跟进项目需要处理：<br>
+          <span style="font-size:0.9em;opacity:0.85;">Hello! The following follow-up items require your attention (${today}):</span>
+        </p>
+      </div>`;
+
+  // 逾期项目按人分组
+  if (allOverdue.length > 0) {
+    const overdueGroups = groupByEmail(allOverdue);
+    body += `
+      <div style="background:#ffffff;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1);padding:30px;margin-bottom:20px;">
+        <h3 style="color:#d32f2f;border-bottom:2px solid #f44336;padding-bottom:10px;margin-bottom:20px;">
+          [逾期] 已逾期跟进项目 Overdue Items (${allOverdue.length}条)
+        </h3>`;
+    for (const email in overdueGroups) {
+      body += buildPersonSection(email, overdueGroups[email], true);
+    }
+    body += '</div>';
+  }
+
+  // 临期项目按人分组
+  if (allDueSoon.length > 0) {
+    const dueSoonGroups = groupByEmail(allDueSoon);
+    body += `
+      <div style="background:#ffffff;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1);padding:30px;margin-bottom:20px;">
+        <h3 style="color:#e65100;border-bottom:2px solid #f39c12;padding-bottom:10px;margin-bottom:20px;">
+          [临期] 即将到期跟进项目 Due Soon Items (${allDueSoon.length}条)
+        </h3>`;
+    for (const email in dueSoonGroups) {
+      body += buildPersonSection(email, dueSoonGroups[email], false);
+    }
+    body += '</div>';
+  }
+
+  body += `
+      <div style="background:#ffffff;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1);padding:30px;">
+        <div style="text-align:center;color:${darkColor};font-size:14px;line-height:1.6;">
+          <p style="margin-bottom:10px;font-weight:600;">请及时处理以上跟进项目！<br>
+          <span style="font-size:0.9em;opacity:0.85;">Please handle the above follow-up items promptly!</span></p>
+          <p style="margin:0;font-style:italic;">此邮件由系统自动发送，请勿回复。<br>
+          <span style="font-size:0.8em;opacity:0.7;">This email is automatically sent by the system, please do not reply.</span></p>
+        </div>
+      </div>
+    </div>`;
+
+  return body;
+}
+
+/**
+ * 生成合并的验证人验证提醒邮件内容（按人员分组）
+ */
+function generateMergedVerifierEmailContent(allItems) {
+  const today = formatDate(new Date());
+
+  // 按邮箱分组
+  const groupByEmail = (items) => {
+    const map = {};
+    items.forEach(item => {
+      const email = item._verifierEmail;
+      if (!map[email]) map[email] = [];
+      map[email].push(item);
+    });
+    return map;
+  };
+
+  const buildPersonSection = (email, items) => {
+    const name = extractNameFromPersonField((items[0] || {}).verifier || '');
+    let rows = '';
+    items.forEach((item, i) => {
+      rows += `
+        <tr style="background-color:${i % 2 === 0 ? '#f0f4ff' : '#ffffff'};">
+          <td style="padding:12px;border-bottom:1px solid #e9ecef;font-weight:500;color:#2c3e50;">${item.id}</td>
+          <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;">${item.reportNo}</td>
+          <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;">${item.paType}</td>
+          <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;max-width:220px;word-wrap:break-word;">${item.paPlan}</td>
+          <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;max-width:200px;word-wrap:break-word;">${item.notes}</td>
+          <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;font-family:monospace;">${formatFollowUpDate(item.dueDate)}</td>
+          <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;">${extractNameFromPersonField(item.owner)}</td>
+          <td style="padding:12px;border-bottom:1px solid #e9ecef;color:#34495e;">${item.status}</td>
+        </tr>`;
+    });
+
+    return `
+      <div style="margin-bottom:15px;">
+        <h4 style="color:#283593;margin-bottom:8px;padding:8px 12px;background:#f0f4ff;border-radius:6px;border-left:3px solid #3f51b5;">
+          ${name} (${email}) - ${items.length}条
+        </h4>
+        <div style="overflow-x:auto;">
+          <table style="width:100%;border-collapse:collapse;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+            <thead>
+              <tr style="background:linear-gradient(135deg,#3f51b5,#283593);color:white;">
+                <th style="padding:10px;text-align:left;font-weight:600;">跟进编号<br><span style="font-size:0.8em;opacity:0.9;">Follow-up ID</span></th>
+                <th style="padding:10px;text-align:left;font-weight:600;">故障报告编号<br><span style="font-size:0.8em;opacity:0.9;">Report No.</span></th>
+                <th style="padding:10px;text-align:left;font-weight:600;">行动类型<br><span style="font-size:0.8em;opacity:0.9;">Type</span></th>
+                <th style="padding:10px;text-align:left;font-weight:600;">预防行动<br><span style="font-size:0.8em;opacity:0.9;">Action Plan</span></th>
+                <th style="padding:10px;text-align:left;font-weight:600;">跟进内容<br><span style="font-size:0.8em;opacity:0.9;">Follow-up Notes</span></th>
+                <th style="padding:10px;text-align:left;font-weight:600;">完成时间<br><span style="font-size:0.8em;opacity:0.9;">Due Date</span></th>
+                <th style="padding:10px;text-align:left;font-weight:600;">责任人<br><span style="font-size:0.8em;opacity:0.9;">Owner</span></th>
+                <th style="padding:10px;text-align:left;font-weight:600;">状态<br><span style="font-size:0.8em;opacity:0.9;">Status</span></th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  };
+
+  const groups = groupByEmail(allItems);
+
+  let body = `
+    <div style="font-family:Arial,sans-serif;max-width:900px;margin:0 auto;background-color:#f8f9fa;padding:20px;">
+      <div style="background:#e8eaf6;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1);padding:30px;margin-bottom:20px;border-left:5px solid #3f51b5;">
+        <h2 style="color:#283593;text-align:center;margin-bottom:20px;border-bottom:3px solid #3f51b5;padding-bottom:10px;">
+          [验证提醒] 故障报告跟进项目待验证<br>
+          <span style="font-size:0.8em;">Follow-up Items Pending Verification</span>
+        </h2>
+        <p style="font-size:16px;line-height:1.6;color:#283593;">
+          您好！（${today}）以下跟进项目等待验证：<br>
+          <span style="font-size:0.9em;opacity:0.85;">Hello! The following follow-up items are pending verification (${today}):</span>
+        </p>
+      </div>
+      <div style="background:#ffffff;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1);padding:30px;margin-bottom:20px;">
+        <h3 style="color:#283593;border-bottom:2px solid #3f51b5;padding-bottom:10px;margin-bottom:20px;">
+          [详情] 待验证跟进项目 Pending Verification Items (${allItems.length}条)
+        </h3>`;
+
+  for (const email in groups) {
+    body += buildPersonSection(email, groups[email]);
+  }
+
+  body += `
+      </div>
+      <div style="background:#ffffff;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1);padding:30px;">
+        <div style="text-align:center;color:#283593;font-size:14px;line-height:1.6;">
+          <p style="margin-bottom:10px;font-weight:600;">请及时对以上项目进行验证！<br>
+          <span style="font-size:0.9em;opacity:0.85;">Please verify the above items promptly!</span></p>
+          <p style="margin:0;font-style:italic;">此邮件由系统自动发送，请勿回复。<br>
+          <span style="font-size:0.8em;opacity:0.7;">This email is automatically sent by the system, please do not reply.</span></p>
+        </div>
+      </div>
+    </div>`;
+
+  return body;
 }
 
 /**
